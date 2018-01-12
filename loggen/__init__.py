@@ -40,10 +40,10 @@ from rfc5424logging import Rfc5424SysLogHandler
 
 #: Semantic version information of the program.
 VERSION_INFO = semver.VersionInfo(
-    major=0,
-    minor=0,
+    major=1,
+    minor=1,
     patch=0,
-    prerelease='alpha.0',
+    prerelease=None,
     build=None
 )
 

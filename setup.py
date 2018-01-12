@@ -32,7 +32,7 @@ with suppress(OSError), open(os.path.join(HERE, 'README.rst')) as fp:
 
 setup(
     name='loggen',
-    version='0.0.0-alpha.0',
+    version='1.1.0',
     license='MIT',
     url='https://github.com/spack971/loggen',
 
@@ -48,7 +48,7 @@ setup(
     # See https://pypi.python.org/pypi?%3Aaction=list_classifiers.
     classifiers=[
         'License :: OSI Approved :: MIT License',
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 5 - Production/Stable',
 
         'Environment :: Console',
         'Intended Audience :: Information Technology',
