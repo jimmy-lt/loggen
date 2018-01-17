@@ -18,6 +18,7 @@
 # You should have received a copy of the MIT License along with
 # loggen. If not, see <http://opensource.org/licenses/MIT>.
 #
+import os
 import sys
 import time
 import signal
@@ -169,12 +170,16 @@ def parse_args(args):
 
     parser.add_argument('-f', '--file',
                         action='append',
-                        help="read log messages from file")
+                        help="read log messages from file or directory")
+
+    parser.add_argument('-r', '--recursive',
+                        action='store_true',
+                        help="recursively look for files in directories")
 
     return vars(parser.parse_args(args))
 
 
-def message_generator(sources, loop=False):
+def message_generator(sources, loop=False, recursive=False):
     """Generate a list of messages from given sources.
 
 
@@ -185,16 +190,42 @@ def message_generator(sources, loop=False):
     :param loop: Should messages be generates indefinitely?
     :type loop: python:bool
 
+    :param recursive: Recursively look for files in given directories.
+    :type recursive: python:bool
+
 
     :returns: A list of messages.
     :rtype: python:~typing.Generator
 
     """
+    def _get_files(name):
+        """Generate a list of file paths in given directory.
+
+
+        :param name: Directory name to walk through.
+        :type name: python:str
+
+
+        :returns: A list of files found into the directory.
+        :rtype: python:~typing.Generator
+
+        """
+        if recursive:
+            return (os.path.join(y[0], x) for y in os.walk(name) for x in y[2])
+        return (x.path for x in os.scandir(name) if x.is_file())
+
+
     is_str = isinstance(sources, str)
     stdin = sources == '-' if is_str else any(map(lambda x: x == '-', sources))
     if loop and stdin:
         log.error("Cannot loop over standard input.")
         raise StopIteration
+
+    if not is_str:
+        sources = tuple(itertools.chain(
+            (x for x in sources if not os.path.isdir(x)),
+            (x for y in sources for x in _get_files(y) if os.path.isdir(y))
+        ))
 
     while True:
         try:
@@ -302,7 +333,9 @@ def main():
 
     # Creating our tasks.
     ctrl = TaskControl(opts['active'], opts['idle'])
-    buff = message_generator(opts['file'] or opts['message'], opts['loop'])
+    buff = message_generator(opts['file'] or opts['message'],
+                             opts['loop'],
+                             opts['recursive'])
 
     for i in range(opts['idle']):
         threading.Thread(target=task_idle,
