@@ -174,23 +174,36 @@ def parse_args(args):
     return vars(parser.parse_args(args))
 
 
-def buffer_generate(sources):
-    """Generate a buffer of messages from given sources.
+def message_generator(sources, loop=False):
+    """Generate a list of messages from given sources.
 
 
-    :param sources: List of sources to read the messages from. If a source is
-                    ``'-'``, it is also replaced by :attr:`sys.stdin`.
+    :param sources: List of sources to read the messages from. If source is
+                    ``'-'``, messages will be read from :attr:`sys.stdin`.
     :type sources: python:str or ~collections.abc.Iterable
+
+    :param loop: Should messages be generates indefinitely?
+    :type loop: python:bool
 
 
     :returns: A list of messages.
-    :rtype: python:tuple
+    :rtype: python:~typing.Generator
 
     """
-    try:
-        return tuple(map(lambda x: str(x).strip(), fileinput.input(sources)))
-    except OSError:
-        return sources.strip(),
+    is_str = isinstance(sources, str)
+    stdin = sources == '-' if is_str else any(map(lambda x: x == '-', sources))
+    if loop and stdin:
+        log.error("Cannot loop over standard input.")
+        raise StopIteration
+
+    while True:
+        try:
+            yield from map(lambda x: str(x).strip(), fileinput.input(sources))
+        except OSError:
+            yield sources.strip()
+
+        if not loop:
+            break
 
 
 def socket_isinet(destination, port):
@@ -256,9 +269,6 @@ def task_active(ctrl, sock_info, buffer=(), loop=False, delay=0):
 
     """
     ctrl.start.wait()
-    if loop:
-        buffer = itertools.cycle(buffer)
-
     try:
         syslog = Rfc5424SysLogHandler(address=sock_info.address,
                                       socktype=sock_info.type)
@@ -292,7 +302,7 @@ def main():
 
     # Creating our tasks.
     ctrl = TaskControl(opts['active'], opts['idle'])
-    buff = buffer_generate(opts['file'] or opts['message'])
+    buff = message_generator(opts['file'] or opts['message'], opts['loop'])
 
     for i in range(opts['idle']):
         threading.Thread(target=task_idle,
