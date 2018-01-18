@@ -18,6 +18,7 @@
 # You should have received a copy of the MIT License along with
 # loggen. If not, see <http://opensource.org/licenses/MIT>.
 #
+import os
 import sys
 import time
 import signal
@@ -169,28 +170,71 @@ def parse_args(args):
 
     parser.add_argument('-f', '--file',
                         action='append',
-                        help="read log messages from file")
+                        help="read log messages from file or directory")
+
+    parser.add_argument('-r', '--recursive',
+                        action='store_true',
+                        help="recursively look for files in directories")
 
     return vars(parser.parse_args(args))
 
 
-def buffer_generate(sources):
-    """Generate a buffer of messages from given sources.
+def message_generator(sources, loop=False, recursive=False):
+    """Generate a list of messages from given sources.
 
 
-    :param sources: List of sources to read the messages from. If a source is
-                    ``'-'``, it is also replaced by :attr:`sys.stdin`.
+    :param sources: List of sources to read the messages from. If source is
+                    ``'-'``, messages will be read from :attr:`sys.stdin`.
     :type sources: python:str or ~collections.abc.Iterable
+
+    :param loop: Should messages be generates indefinitely?
+    :type loop: python:bool
+
+    :param recursive: Recursively look for files in given directories.
+    :type recursive: python:bool
 
 
     :returns: A list of messages.
-    :rtype: python:tuple
+    :rtype: python:~typing.Generator
 
     """
-    try:
-        return tuple(map(lambda x: str(x).strip(), fileinput.input(sources)))
-    except OSError:
-        return sources.strip(),
+    def _get_files(name):
+        """Generate a list of file paths in given directory.
+
+
+        :param name: Directory name to walk through.
+        :type name: python:str
+
+
+        :returns: A list of files found into the directory.
+        :rtype: python:~typing.Generator
+
+        """
+        if recursive:
+            return (os.path.join(y[0], x) for y in os.walk(name) for x in y[2])
+        return (x.path for x in os.scandir(name) if x.is_file())
+
+
+    is_str = isinstance(sources, str)
+    stdin = sources == '-' if is_str else any(map(lambda x: x == '-', sources))
+    if loop and stdin:
+        log.error("Cannot loop over standard input.")
+        raise StopIteration
+
+    if not is_str:
+        sources = tuple(itertools.chain(
+            (x for x in sources if not os.path.isdir(x)),
+            (x for y in sources for x in _get_files(y) if os.path.isdir(y))
+        ))
+
+    while True:
+        try:
+            yield from map(lambda x: str(x).strip(), fileinput.input(sources))
+        except OSError:
+            yield sources.strip()
+
+        if not loop:
+            break
 
 
 def socket_isinet(destination, port):
@@ -256,9 +300,6 @@ def task_active(ctrl, sock_info, buffer=(), loop=False, delay=0):
 
     """
     ctrl.start.wait()
-    if loop:
-        buffer = itertools.cycle(buffer)
-
     try:
         syslog = Rfc5424SysLogHandler(address=sock_info.address,
                                       socktype=sock_info.type)
@@ -292,7 +333,9 @@ def main():
 
     # Creating our tasks.
     ctrl = TaskControl(opts['active'], opts['idle'])
-    buff = buffer_generate(opts['file'] or opts['message'])
+    buff = message_generator(opts['file'] or opts['message'],
+                             opts['loop'],
+                             opts['recursive'])
 
     for i in range(opts['idle']):
         threading.Thread(target=task_idle,
