@@ -157,9 +157,15 @@ def parse_args(args):
                            help="force use of UDP")
 
     # Messages.
-    parser.add_argument('-8', '--loop',
-                        action='store_true',
-                        help="send given log messages in loop")
+    loop = parser.add_mutually_exclusive_group()
+    loop.add_argument('-8', '--loop',
+                      action='store_true',
+                      help="send given log messages indefinitely")
+
+    loop.add_argument('-c', '--count',
+                      type=int,
+                      default=1,
+                      help="number of times to send messages")
 
     parser.add_argument('-w', '--wait',
                         type=int,
@@ -187,8 +193,9 @@ def message_generator(sources, loop=False, recursive=False):
                     ``'-'``, messages will be read from :attr:`sys.stdin`.
     :type sources: python:str or ~collections.abc.Iterable
 
-    :param loop: Should messages be generates indefinitely?
-    :type loop: python:bool
+    :param loop: Number of time to send messages from the sources. If set to
+                 ``True``, messages are sent indefinitely.
+    :type loop: python:bool or python:int
 
     :param recursive: Recursively look for files in given directories.
     :type recursive: python:bool
@@ -215,23 +222,29 @@ def message_generator(sources, loop=False, recursive=False):
         return (x.path for x in os.scandir(name) if x.is_file())
 
 
-    is_str = isinstance(sources, str)
-    stdin = sources == '-' if is_str else any(map(lambda x: x == '-', sources))
+    src_str = isinstance(sources, str)
+    stdin = sources == '-' if src_str else any(map(lambda x: x == '-', sources))
     if loop and stdin:
         log.error("Cannot loop over standard input.")
         raise StopIteration
 
-    if not is_str:
+    if not src_str:
         sources = tuple(itertools.chain(
             (x for x in sources if not os.path.isdir(x)),
             (x for y in sources for x in _get_files(y) if os.path.isdir(y))
         ))
 
+    loop_bool = isinstance(loop, bool)
     while True:
         try:
+            # Source can still be a file so let's first try to read it.
             yield from map(lambda x: str(x).strip(), fileinput.input(sources))
         except OSError:
+            # Nope! Not a file.
             yield sources.strip()
+
+        if not loop_bool:
+            loop -= 1
 
         if not loop:
             break
@@ -332,8 +345,9 @@ def main():
 
     # Creating our tasks.
     ctrl = TaskControl(opts['active'], opts['idle'])
+    loop = opts['loop'] or opts['count']
     buff = message_generator(opts['file'] or opts['message'],
-                             opts['loop'],
+                             loop,
                              opts['recursive'])
 
     for i in range(opts['idle']):
@@ -343,7 +357,7 @@ def main():
 
     for i in range(opts['active']):
         threading.Thread(target=task_active,
-                         args=(ctrl, info, buff, opts['loop'], opts['wait']),
+                         args=(ctrl, info, buff, loop, opts['wait']),
                          name='{}-a{}'.format(PROG_NAME, i)).start()
 
     with suppress(threading.BrokenBarrierError):
