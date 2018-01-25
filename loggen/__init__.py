@@ -315,9 +315,8 @@ def task_active(ctrl, sock_info, buffer=(), loop=False, delay=0):
         if delay > 0:
             time.sleep(delay / 1000)
 
-    if not loop:
-        with suppress(threading.BrokenBarrierError):
-            ctrl.done.wait()
+    with suppress(threading.BrokenBarrierError):
+        ctrl.done.wait()
     ctrl.shutdown.wait()
 
 
@@ -347,8 +346,6 @@ def main():
                          args=(ctrl, info, buff, opts['loop'], opts['wait']),
                          name='{}-a{}'.format(PROG_NAME, i)).start()
 
-    # Time to start the tasks.
-    if not opts['loop']:
-        with suppress(threading.BrokenBarrierError):
-            ctrl.done.wait()
-        ctrl.shutdown.set()
+    with suppress(threading.BrokenBarrierError):
+        ctrl.done.wait()
+    ctrl.shutdown.set()
