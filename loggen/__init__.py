@@ -30,6 +30,8 @@ import itertools
 import fileinput
 import collections
 
+import random
+
 import semver
 import argparse
 
@@ -174,6 +176,10 @@ def parse_args(args):
                             "delay in milliseconds to wait between each message"
                         ))
 
+    parser.add_argument('-d', '--delay',
+                        action='store_true',
+                        help="randomly delay startup of the active tasks")
+
     parser.add_argument('-f', '--file',
                         action='append',
                         help="read log messages from file or directory")
@@ -292,7 +298,7 @@ def task_idle(ctrl, sock_info):
     ctrl.shutdown.wait()
 
 
-def task_active(ctrl, sock_info, buffer=(), loop=False, delay=0):
+def task_active(ctrl, sock_info, buffer=(), loop=False, wait=0, delay=False):
     """A task to send syslog messages to a remote host.
 
 
@@ -308,11 +314,17 @@ def task_active(ctrl, sock_info, buffer=(), loop=False, delay=0):
     :param loop: Whether the buffer should be sent indefinitely or not.
     :type loop: python:bool
 
-    :param delay: Time to wait before sending the next message.
-    :type delay: python:int
+    :param wait: Time to wait before sending the next message.
+    :type wait: python:int
+
+    :param delay: Randomly delay startup of the task.
+    :type delay: python:bool
 
     """
     ctrl.start.wait()
+    if delay:
+        time.sleep(random.randint(0, wait or 1000) / 1000)
+
     try:
         syslog = Rfc5424SysLogHandler(address=sock_info.address,
                                       socktype=sock_info.type)
@@ -357,7 +369,14 @@ def main():
 
     for i in range(opts['active']):
         threading.Thread(target=task_active,
-                         args=(ctrl, info, buff, loop, opts['wait']),
+                         args=(
+                             ctrl,
+                             info,
+                             buff,
+                             loop,
+                             opts['wait'],
+                             opts['delay'],
+                         ),
                          name='{}-a{}'.format(PROG_NAME, i)).start()
 
     with suppress(threading.BrokenBarrierError):
