@@ -35,6 +35,7 @@ import random
 import semver
 import argparse
 
+from enum import Enum
 from contextlib import suppress
 
 from logging.handlers import SysLogHandler
@@ -67,6 +68,19 @@ SockInfo = collections.namedtuple('SockInfo', [
     'address',
     'type',
 ])
+
+
+class SyslogFormat(str, Enum):
+    """Log formats enumeration."""
+    RFC3164 = 'rfc3164'
+    RFC5424 = 'rfc5424'
+
+
+class RFC3164Formatter(logging.Formatter):
+    """RFC 3164 syslog message formatter."""
+    def __init__(self):
+        """Constructor for :class:`loggen.RFC3164Formatter`."""
+        super().__init__(fmt='%(asctime)s %(hostname)s %(message)s')
 
 
 class TaskControl(object):
@@ -159,6 +173,20 @@ def parse_args(args):
                            help="force use of UDP")
 
     # Messages.
+    syslog = parser.add_mutually_exclusive_group()
+    syslog.add_argument('-s', '--rfc5424',
+                        action='store_const',
+                        const=SyslogFormat.RFC5424,
+                        default=SyslogFormat.RFC5424,
+                        dest='syslog_format',
+                        help="send messages following the RFC5424 syslog format")
+
+    syslog.add_argument('-S', '--rfc3164',
+                        action='store_const',
+                        const=SyslogFormat.RFC3164,
+                        dest='syslog_format',
+                        help="send messages following the BSD syslog format")
+
     loop = parser.add_mutually_exclusive_group()
     loop.add_argument('-8', '--loop',
                       action='store_true',
@@ -298,7 +326,8 @@ def task_idle(ctrl, sock_info):
     ctrl.shutdown.wait()
 
 
-def task_active(ctrl, sock_info, buffer=(), loop=False, wait=0, delay=False):
+def task_active(ctrl, sock_info, buffer=(),
+                fmt=SyslogFormat.RFC5424, loop=False, wait=0, delay=False):
     """A task to send syslog messages to a remote host.
 
 
@@ -311,6 +340,9 @@ def task_active(ctrl, sock_info, buffer=(), loop=False, wait=0, delay=False):
     :param buffer: List of messages to send to the host.
     :type buffer: python:~collections.abc.Iterable
 
+    :param fmt: Syslog message format to be used.
+    :type fmt: ~loggen.SyslogFormat
+
     :param loop: Whether the buffer should be sent indefinitely or not.
     :type loop: python:bool
 
@@ -321,22 +353,36 @@ def task_active(ctrl, sock_info, buffer=(), loop=False, wait=0, delay=False):
     :type delay: python:bool
 
     """
+    _handler = {
+        SyslogFormat.RFC3164: SysLogHandler,
+        SyslogFormat.RFC5424: Rfc5424SysLogHandler,
+    }
+    hostname = socket.gethostname()
+
     ctrl.start.wait()
     if delay:
         time.sleep(random.randint(0, wait or 1000) / 1000)
 
     try:
-        syslog = Rfc5424SysLogHandler(address=sock_info.address,
-                                      socktype=sock_info.type)
+        syslog = _handler[fmt](address=sock_info.address,
+                               socktype=sock_info.type)
+        if fmt is SyslogFormat.RFC3164:
+            syslog.formatter = RFC3164Formatter()
     except ConnectionError:
         log.error("Could not connect host at: {}".format(sock_info.address))
+        return
+    except KeyError:
+        log.error("Unknown syslog message format: {!r}".format(fmt))
         return
 
     for msg in buffer:
         if ctrl.shutdown.is_set():
             break
 
-        syslog.emit(logging.makeLogRecord({'msg': msg}))
+        syslog.emit(logging.makeLogRecord({
+            'hostname': hostname,
+            'msg': msg
+        }))
         if delay > 0:
             time.sleep(delay / 1000)
 
@@ -373,6 +419,7 @@ def main():
                              ctrl,
                              info,
                              buff,
+                             opts['syslog_format'],
                              loop,
                              opts['wait'],
                              opts['delay'],
