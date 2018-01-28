@@ -430,8 +430,9 @@ def task_active(ctrl, sock_info, buffer=(),
             'hostname': hostname,
             'msg': msg
         }))
-        if delay > 0:
-            time.sleep(delay / 1000)
+
+        if wait > 0 and not ctrl.shutdown.is_set():
+            time.sleep(wait / 1000)
 
     with suppress(threading.BrokenBarrierError):
         ctrl.done.wait()
