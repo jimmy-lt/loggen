@@ -380,7 +380,7 @@ def task_idle(ctrl, sock_info):
 
 
 def task_active(ctrl, sock_info, buffer=(),
-                fmt=SyslogFormat.RFC5424, loop=False, wait=0, delay=False):
+                fmt=SyslogFormat.RFC5424, wait=0, delay=False):
     """A task to send syslog messages to a remote host.
 
 
@@ -395,9 +395,6 @@ def task_active(ctrl, sock_info, buffer=(),
 
     :param fmt: Syslog message format to be used.
     :type fmt: ~loggen.SyslogFormat
-
-    :param loop: Whether the buffer should be sent indefinitely or not.
-    :type loop: python:bool
 
     :param wait: Time to wait before sending the next message.
     :type wait: python:int
@@ -466,7 +463,6 @@ def main():
                              info,
                              buff,
                              opts['syslog_format'],
-                             loop,
                              opts['wait'],
                              opts['delay'],
                          ),
