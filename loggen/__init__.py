@@ -38,7 +38,7 @@ import argparse
 from enum import Enum
 from contextlib import suppress
 
-from logging.handlers import SysLogHandler
+from logging.handlers import SysLogHandler, SYSLOG_UDP_PORT
 from rfc5424logging import Rfc5424SysLogHandler
 
 
@@ -72,8 +72,55 @@ SockInfo = collections.namedtuple('SockInfo', [
 
 class SyslogFormat(str, Enum):
     """Log formats enumeration."""
+    RAW = 'raw'
     RFC3164 = 'rfc3164'
     RFC5424 = 'rfc5424'
+
+
+class RawSyslogHandler(SysLogHandler):
+    """A log handler class which sends unaltered logging messages to a syslog
+    server.
+
+
+    :param address: Remote server to send the messages to in the form of a
+                    (host, port) tuple. If address is specified as a string, a
+                    UNIX socket is used.
+    :type address: python:tuple or python:str
+
+    :param socktype: The type of socket to use. Most likely one of
+                     :data:`socket.SOCK_STREAM` (TCP) or
+                     :data:`socket.SOCK_DGRAM` (UDP).
+    :type socktype: python:~socket.SocketKind
+
+    """
+    def __init__(self, address=('localhost', SYSLOG_UDP_PORT), socktype=None):
+        """Constructor for :class:`loggen.RawSyslogHandler`."""
+        super().__init__(address=address, socktype=socktype)
+
+
+    def emit(self, record):
+        """Emit a record.
+
+
+        :param record: Log record to be emitted.
+        :type record: python:~logging.LogRecord
+
+        """
+        try:
+            msg = self.format(record).encode('utf-8')
+            if self.unixsocket:
+                try:
+                    self.socket.send(msg)
+                except OSError:
+                    self.socket.close()
+                    self._connect_unixsocket(self.address)
+                    self.socket.send(msg)
+            elif self.socktype == socket.SOCK_DGRAM:
+                self.socket.sendto(msg, self.address)
+            else:
+                self.socket.sendall(msg)
+        except Exception:
+            self.handleError(record)
 
 
 class RFC3164Formatter(logging.Formatter):
@@ -186,6 +233,12 @@ def parse_args(args):
                         const=SyslogFormat.RFC3164,
                         dest='syslog_format',
                         help="send messages following the BSD syslog format")
+
+    syslog.add_argument('-R', '--raw',
+                        action='store_const',
+                        const=SyslogFormat.RAW,
+                        dest='syslog_format',
+                        help="send messages as is without any alteration")
 
     loop = parser.add_mutually_exclusive_group()
     loop.add_argument('-8', '--loop',
@@ -354,6 +407,7 @@ def task_active(ctrl, sock_info, buffer=(),
 
     """
     _handler = {
+        SyslogFormat.RAW: RawSyslogHandler,
         SyslogFormat.RFC3164: SysLogHandler,
         SyslogFormat.RFC5424: Rfc5424SysLogHandler,
     }
