@@ -70,13 +70,6 @@ SockInfo = collections.namedtuple('SockInfo', [
 ])
 
 
-class SyslogFormat(str, Enum):
-    """Log formats enumeration."""
-    RAW = 'raw'
-    RFC3164 = 'rfc3164'
-    RFC5424 = 'rfc5424'
-
-
 class RawSyslogHandler(SysLogHandler):
     """A log handler class which sends unaltered logging messages to a syslog
     server.
@@ -121,6 +114,13 @@ class RawSyslogHandler(SysLogHandler):
                 self.socket.sendall(msg)
         except Exception:
             self.handleError(record)
+
+
+class SyslogFormat(Enum):
+    """Log formats enumeration."""
+    RAW = RawSyslogHandler
+    RFC3164 = SysLogHandler
+    RFC5424 = Rfc5424SysLogHandler
 
 
 class RFC3164Formatter(logging.Formatter):
@@ -371,8 +371,8 @@ def task_idle(ctrl, sock_info):
     """
     ctrl.start.wait()
     try:
-        syslog = SysLogHandler(address=sock_info.address,
-                               socktype=sock_info.type)
+        syslog = SyslogFormat.RFC3164.value(address=sock_info.address,
+                                            socktype=sock_info.type)
     except ConnectionError:
         log.error("Could not connect host at: {}".format(sock_info.address))
 
@@ -406,20 +406,13 @@ def task_active(ctrl, sock_info, buffer=(),
     :type delay: python:bool
 
     """
-    _handler = {
-        SyslogFormat.RAW: RawSyslogHandler,
-        SyslogFormat.RFC3164: SysLogHandler,
-        SyslogFormat.RFC5424: Rfc5424SysLogHandler,
-    }
     hostname = socket.gethostname()
-
     ctrl.start.wait()
     if delay:
         time.sleep(random.randint(0, wait or 1000) / 1000)
 
     try:
-        syslog = _handler[fmt](address=sock_info.address,
-                               socktype=sock_info.type)
+        syslog = fmt.value(address=sock_info.address, socktype=sock_info.type)
         if fmt is SyslogFormat.RFC3164:
             syslog.formatter = RFC3164Formatter()
     except ConnectionError:
