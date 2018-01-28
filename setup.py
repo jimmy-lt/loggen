@@ -32,7 +32,7 @@ with suppress(OSError), open(os.path.join(HERE, 'README.rst')) as fp:
 
 setup(
     name='loggen',
-    version='1.1.0',
+    version='1.2.0',
     license='MIT',
     url='https://github.com/spack971/loggen',
 
@@ -41,7 +41,7 @@ setup(
 
     description='A syslog message generator.',
     long_description=LONG_DESCRIPTION,
-    keywords='syslog generator rfc5424',
+    keywords='syslog generator rfc5424 rfc3164',
 
     packages=find_packages(),
 
