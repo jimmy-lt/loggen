@@ -417,7 +417,7 @@ def task_active(ctrl, sock_info, buffer=(),
             syslog.formatter = RFC3164Formatter()
     except ConnectionError:
         log.error("Could not connect host at: {}".format(sock_info.address))
-    except KeyError:
+    except AttributeError:
         log.error("Unknown syslog message format: {!r}".format(fmt))
     else:
         for msg in buffer:
