@@ -417,22 +417,20 @@ def task_active(ctrl, sock_info, buffer=(),
             syslog.formatter = RFC3164Formatter()
     except ConnectionError:
         log.error("Could not connect host at: {}".format(sock_info.address))
-        return
-    except KeyError:
+    except AttributeError:
         log.error("Unknown syslog message format: {!r}".format(fmt))
-        return
+    else:
+        for msg in buffer:
+            if ctrl.shutdown.is_set():
+                break
 
-    for msg in buffer:
-        if ctrl.shutdown.is_set():
-            break
+            syslog.emit(logging.makeLogRecord({
+                'hostname': hostname,
+                'msg': msg
+            }))
 
-        syslog.emit(logging.makeLogRecord({
-            'hostname': hostname,
-            'msg': msg
-        }))
-
-        if wait > 0 and not ctrl.shutdown.is_set():
-            time.sleep(wait / 1000)
+            if wait > 0 and not ctrl.shutdown.is_set():
+                time.sleep(wait / 1000)
 
     with suppress(threading.BrokenBarrierError):
         ctrl.done.wait()
