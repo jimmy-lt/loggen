@@ -242,12 +242,15 @@ def parse_args(args):
 
     loop = parser.add_mutually_exclusive_group()
     loop.add_argument('-8', '--loop',
-                      action='store_true',
+                      action='store_const',
+                      const=-1,
+                      dest='loop',
                       help="send given log messages indefinitely")
 
     loop.add_argument('-c', '--count',
                       type=int,
                       default=1,
+                      dest='loop',
                       help="number of times to send messages")
 
     parser.add_argument('-w', '--wait',
@@ -272,7 +275,7 @@ def parse_args(args):
     return vars(parser.parse_args(args))
 
 
-def message_generator(sources, loop=False, recursive=False):
+def message_generator(sources, loop=1, recursive=False):
     """Generate a list of messages from given sources.
 
 
@@ -281,8 +284,8 @@ def message_generator(sources, loop=False, recursive=False):
     :type sources: python:str or ~collections.abc.Iterable
 
     :param loop: Number of time to send messages from the sources. If set to
-                 ``True``, messages are sent indefinitely.
-    :type loop: python:bool or python:int
+                 ``-1``, messages are sent indefinitely.
+    :type loop: python:int
 
     :param recursive: Recursively look for files in given directories.
     :type recursive: python:bool
@@ -308,10 +311,9 @@ def message_generator(sources, loop=False, recursive=False):
             return (os.path.join(y[0], x) for y in os.walk(name) for x in y[2])
         return (x.path for x in os.scandir(name) if x.is_file())
 
-
     src_str = isinstance(sources, str)
     stdin = sources == '-' if src_str else any(map(lambda x: x == '-', sources))
-    if loop and stdin:
+    if loop not in {0, 1} and stdin:
         log.error("Cannot loop over standard input.")
         raise StopIteration
 
@@ -321,8 +323,7 @@ def message_generator(sources, loop=False, recursive=False):
             (x for y in sources for x in _get_files(y) if os.path.isdir(y))
         ))
 
-    loop_bool = isinstance(loop, bool)
-    while True:
+    while loop:
         try:
             # Source can still be a file so let's first try to read it.
             yield from map(lambda x: str(x).strip(), fileinput.input(sources))
@@ -330,11 +331,8 @@ def message_generator(sources, loop=False, recursive=False):
             # Nope! Not a file.
             yield sources.strip()
 
-        if not loop_bool:
+        if loop > 0:
             loop -= 1
-
-        if not loop:
-            break
 
 
 def socket_isinet(destination, port):
@@ -446,9 +444,8 @@ def main():
 
     # Creating our tasks.
     ctrl = TaskControl(opts['active'], opts['idle'])
-    loop = opts['loop'] or opts['count']
     buff = message_generator(opts['file'] or opts['message'],
-                             loop,
+                             opts['loop'],
                              opts['recursive'])
 
     for i in range(opts['idle']):
