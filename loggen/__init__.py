@@ -37,6 +37,7 @@ import argparse
 
 from enum import Enum
 from contextlib import suppress
+from multiprocessing import Pipe
 
 from logging.handlers import SysLogHandler, SYSLOG_UDP_PORT
 from rfc5424logging import Rfc5424SysLogHandler
@@ -136,9 +137,9 @@ class TaskControl(object):
     def __init__(self, tasks_active=1, tasks_idle=0):
         """Constructor for :class:`~loggen.TaskControl`."""
         #: Barrier for threads to wait the start signal.
-        self.start = threading.Barrier(tasks_active + tasks_idle)
+        self.start = threading.Barrier(tasks_active + tasks_idle + 1)
         #: Barrier to notify that a thread has done its task.
-        self.done = threading.Barrier(tasks_active + 1)
+        self.done = threading.Barrier(tasks_active + 2)
         #: Event to stop and terminate the task.
         self.shutdown = threading.Event()
 
@@ -356,6 +357,58 @@ def socket_isinet(destination, port):
         return False
 
 
+def task_feeder(ctrl, queues, buffer=()):
+    """A task to send messages to the active tasks.
+
+
+    :param ctrl: Task execution control class instance.
+    :type ctrl: ~loggen.TaskControl
+
+    :param queues: Communication queues with the active tasks.
+    :type queues: python:~collections.abc.Iterable
+
+    :param buffer: List of messages to send to the active tasks.
+    :type buffer: python:~collections.abc.Iterable
+
+    """
+    excluded = []
+    xapp = excluded.append
+    receivers = list(queues)
+
+    ctrl.start.wait()
+    for msg in buffer:
+        if ctrl.shutdown.is_set():
+                break
+
+        del excluded[:]
+        for i, q in enumerate(receivers):
+            try:
+                q.send(msg)
+            except BrokenPipeError:
+                # If we get an error, close the connection and put it to the
+                # excluded list.
+                q.close()
+                xapp(i)
+
+        # Remove stale connections to win some CPU cycles.
+        for i in excluded:
+            receivers.pop(i)
+
+        # No one is listening, let's get out of here.
+        if not receivers:
+            break
+
+    # Closing remaining connections.
+    for q in receivers:
+        with suppress(BrokenPipeError):
+            q.send('---EOF---')
+        q.close()
+
+    with suppress(threading.BrokenBarrierError):
+        ctrl.done.wait()
+    ctrl.shutdown.wait()
+
+
 def task_idle(ctrl, sock_info):
     """A task to create an idle connection to a remote host.
 
@@ -377,7 +430,7 @@ def task_idle(ctrl, sock_info):
     ctrl.shutdown.wait()
 
 
-def task_active(ctrl, sock_info, buffer=(),
+def task_active(ctrl, sock_info, queue,
                 fmt=SyslogFormat.RFC5424, wait=0, delay=False):
     """A task to send syslog messages to a remote host.
 
@@ -388,8 +441,8 @@ def task_active(ctrl, sock_info, buffer=(),
     :param sock_info: Information to be passed for the socket creation.
     :type sock_info: ~python:typing.Any
 
-    :param buffer: List of messages to send to the host.
-    :type buffer: python:~collections.abc.Iterable
+    :param queue: Communication queue with the feeder thread.
+    :type queue: python:~multiprocessing.Connection
 
     :param fmt: Syslog message format to be used.
     :type fmt: ~loggen.SyslogFormat
@@ -415,18 +468,20 @@ def task_active(ctrl, sock_info, buffer=(),
     except AttributeError:
         log.error("Unknown syslog message format: {!r}".format(fmt))
     else:
-        for msg in buffer:
-            if ctrl.shutdown.is_set():
-                break
+        with suppress(OSError):
+            for msg in iter(queue.recv, '---EOF---'):
+                if ctrl.shutdown.is_set():
+                    break
 
-            syslog.emit(logging.makeLogRecord({
-                'hostname': hostname,
-                'msg': msg
-            }))
+                syslog.emit(logging.makeLogRecord({
+                    'hostname': hostname,
+                    'msg': msg
+                }))
 
-            if wait > 0 and not ctrl.shutdown.is_set():
-                time.sleep(wait / 1000)
+                if wait > 0 and not ctrl.shutdown.is_set():
+                    time.sleep(wait / 1000)
 
+    queue.close()
     with suppress(threading.BrokenBarrierError):
         ctrl.done.wait()
     ctrl.shutdown.wait()
@@ -448,6 +503,11 @@ def main():
                              opts['loop'],
                              opts['recursive'])
 
+    queues = [Pipe(duplex=False) for _ in range(opts['active'])]
+    threading.Thread(target=task_feeder,
+                     args=(ctrl, (x[1] for x in queues), buff),
+                     name='{}-f0'.format(PROG_NAME)).start()
+
     for i in range(opts['idle']):
         threading.Thread(target=task_idle,
                          args=(ctrl, info),
@@ -458,7 +518,7 @@ def main():
                          args=(
                              ctrl,
                              info,
-                             buff,
+                             queues[i][0],
                              opts['syslog_format'],
                              opts['wait'],
                              opts['delay'],
