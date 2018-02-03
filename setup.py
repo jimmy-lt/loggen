@@ -32,7 +32,7 @@ with suppress(OSError), open(os.path.join(HERE, 'README.rst')) as fp:
 
 setup(
     name='loggen',
-    version='1.2.0',
+    version='1.2.1',
     license='MIT',
     url='https://github.com/spack971/loggen',
 

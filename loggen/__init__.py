@@ -47,7 +47,7 @@ from rfc5424logging import Rfc5424SysLogHandler
 VERSION_INFO = semver.VersionInfo(
     major=1,
     minor=2,
-    patch=0,
+    patch=1,
     prerelease=None,
     build=None
 )

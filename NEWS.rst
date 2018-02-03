@@ -1,6 +1,18 @@
 News
 ====
 
+1.2.1
+-----
+
+Fixed
+#####
+
+- It was impossible to send a message multiple times even if the standard input
+  was not used.
+- It was not possible to use multiple active threads due to our messages were
+  generated.
+
+
 1.2.0
 -----
 
